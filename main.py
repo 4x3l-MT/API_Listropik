@@ -1,87 +1,91 @@
 import os
-import re
-import urllib.parse
-import yt_dlp
-from fastapi import FastAPI, HTTPException
+import shutil
+import tempfile
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
-from starlette.background import BackgroundTask
+from pydantic import BaseModel, HttpUrl
+import yt_dlp
 
-app = FastAPI()
+app = FastAPI(
+    title="YouTube Audio Downloader API",
+    description="API asíncrona para conversión y descarga de audio de YouTube a MP3",
+    version="2.0.0"
+)
 
-CARPETA = "Mi_Musica"
+# Permite conexiones desde la app móvil en tu red local
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["Content-Disposition"]  # Permite que la app lea el nombre original del archivo
+)
 
+class DownloadRequest(BaseModel):
+    url: HttpUrl
 
-class SolicitudDescarga(BaseModel):
-    url: str
+def remove_temp_dir(dir_path: str):
+    """Elimina la carpeta temporal después de completar el envío del archivo."""
+    if os.path.exists(dir_path):
+        shutil.rmtree(dir_path, ignore_errors=True)
+        print(f"Directorio temporal limpiado: {dir_path}")
 
+@app.get("/ping")
+async def ping():
+    """Ruta para verificar que la laptop está visible en la red local."""
+    return {
+        "status": "online",
+        "message": "Servidor FastAPI activo en red local"
+    }
 
-def limpiar_texto(texto: str) -> str:
-    # Quita paréntesis, corchetes y guiones bajos
-    texto = re.sub(r'\(.*?\)', '', texto)
-    texto = re.sub(r'\[.*?\]', '', texto)
-    texto = re.sub(r'_', ' ', texto)
-    texto = re.sub(r'\s+', ' ', texto).strip()
-    return texto if texto else "audio"
+@app.post("/download")
+async def download_audio(payload: DownloadRequest, background_tasks: BackgroundTasks):
+    """Descarga el audio de YouTube, lo convierte a MP3 y lo transmite al cliente."""
+    url_str = str(payload.url)
+    temp_dir = tempfile.mkdtemp(prefix="yt_audio_")
 
-
-@app.post("/descargar")
-def descargar_musica(solicitud: SolicitudDescarga):
-    if not os.path.exists(CARPETA):
-        os.makedirs(CARPETA)
-
-    # Forzamos un nombre fijo para el archivo temporal de descarga
-    # así sabemos exactamente qué archivo leer sin tener que buscarlo en la carpeta
-    archivo_temp = os.path.join(CARPETA, "download_temp.mp3")
-
-    opciones = {
+    ydl_opts = {
         'format': 'bestaudio/best',
-        'outtmpl': os.path.join(CARPETA, "download_temp.%(ext)s"),
-        'noplaylist': True,
-        'overwrites': True,  # Sobrescribe el archivo temporal anterior si quedó alguno
+        'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
             'preferredquality': '192',
         }],
+        'quiet': True,
+        'no_warnings': True,
     }
 
     try:
-        with yt_dlp.YoutubeDL(opciones) as ydl:
-            info = ydl.extract_info(solicitud.url, download=True)
-            titulo_original = info.get('title', 'Musica')
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url_str, download=True)
+            temp_filename = ydl.prepare_filename(info)
+            base, _ = os.path.splitext(temp_filename)
+            final_mp3 = base + ".mp3"
 
-        if not os.path.exists(archivo_temp):
-            raise HTTPException(status_code=500, detail="No se pudo procesar el audio")
+        if not os.path.exists(final_mp3):
+            remove_temp_dir(temp_dir)
+            raise HTTPException(status_code=500, detail="Error al procesar el archivo MP3.")
 
-        # Limpiamos el nombre con el que se guardará en tu celular
-        nombre_final = f"{limpiar_texto(titulo_original)}.mp3"
+        clean_filename = os.path.basename(final_mp3)
 
-        # Borra el archivo del servidor una vez que el teléfono termine de descargarlo
-        def borrar():
-            try:
-                if os.path.exists(archivo_temp):
-                    os.remove(archivo_temp)
-            except Exception:
-                pass
+        # Se programa la eliminación de la carpeta temporal tras finalizar la descarga
+        background_tasks.add_task(remove_temp_dir, temp_dir)
 
-        # Codificación UTF-8 para que la app del celular interprete tildes y caracteres especiales
-        nombre_encoded = urllib.parse.quote(nombre_final)
-
-        response = FileResponse(
-            path=archivo_temp,
+        return FileResponse(
+            path=final_mp3,
             media_type="audio/mpeg",
-            background=BackgroundTask(borrar)
+            filename=clean_filename,
+            headers={"Content-Disposition": f'attachment; filename="{clean_filename}"'}
         )
-        response.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{nombre_encoded}"
-        return response
 
     except Exception as e:
-        if os.path.exists(archivo_temp):
-            os.remove(archivo_temp)
-        raise HTTPException(status_code=500, detail=str(e))
+        remove_temp_dir(temp_dir)
+        raise HTTPException(status_code=500, detail=f"Error durante el procesamiento: {str(e)}")
 
-
-@app.get("/")
-def inicio():
-    return {"mensaje": "Servidor de música personal activo"}
+if __name__ == "__main__":
+    import uvicorn
+    # Servidor expuesto en el puerto 8000 para red local
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
