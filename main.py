@@ -1,7 +1,8 @@
-import re
 import os
+import re
+import urllib.parse
 import yt_dlp
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
@@ -10,78 +11,77 @@ app = FastAPI()
 
 CARPETA = "Mi_Musica"
 
+
 class SolicitudDescarga(BaseModel):
     url: str
 
-@app.on_event("startup")
-def limpiar_carpeta():
-    if os.path.exists(CARPETA):
-        for f in os.listdir(CARPETA):
-            try:
-                os.remove(os.path.join(CARPETA, f))
-            except Exception:
-                pass
+
+def limpiar_texto(texto: str) -> str:
+    # Quita paréntesis, corchetes y guiones bajos
+    texto = re.sub(r'\(.*?\)', '', texto)
+    texto = re.sub(r'\[.*?\]', '', texto)
+    texto = re.sub(r'_', ' ', texto)
+    texto = re.sub(r'\s+', ' ', texto).strip()
+    return texto if texto else "audio"
+
 
 @app.post("/descargar")
 def descargar_musica(solicitud: SolicitudDescarga):
+    if not os.path.exists(CARPETA):
+        os.makedirs(CARPETA)
+
+    # Forzamos un nombre fijo para el archivo temporal de descarga
+    # así sabemos exactamente qué archivo leer sin tener que buscarlo en la carpeta
+    archivo_temp = os.path.join(CARPETA, "download_temp.mp3")
+
+    opciones = {
+        'format': 'bestaudio/best',
+        'outtmpl': os.path.join(CARPETA, "download_temp.%(ext)s"),
+        'noplaylist': True,
+        'overwrites': True,  # Sobrescribe el archivo temporal anterior si quedó alguno
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+    }
+
     try:
-        if not os.path.exists(CARPETA):
-            os.makedirs(CARPETA)
-
-        opciones = {
-            'format': 'bestaudio/best',
-            'outtmpl': f'{CARPETA}/%(title)s.%(ext)s',
-            'noplaylist': True,
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-        }
-
         with yt_dlp.YoutubeDL(opciones) as ydl:
             info = ydl.extract_info(solicitud.url, download=True)
-            titulo = info.get('title', 'desconocido')
+            titulo_original = info.get('title', 'Musica')
 
-        archivo = None
-        for f in os.listdir(CARPETA):
-            if f.endswith(".mp3") and titulo[:10] in f:
-                archivo = os.path.join(CARPETA, f)
-                break
+        if not os.path.exists(archivo_temp):
+            raise HTTPException(status_code=500, detail="No se pudo procesar el audio")
 
-        if archivo is None:
-            archivos = [os.path.join(CARPETA, f) for f in os.listdir(CARPETA) if f.endswith(".mp3")]
-            if archivos:
-                archivo = max(archivos, key=os.path.getctime)
-            else:
-                return {"status": "error", "mensaje": "No se encontró el archivo"}
+        # Limpiamos el nombre con el que se guardará en tu celular
+        nombre_final = f"{limpiar_texto(titulo_original)}.mp3"
 
-        nombre_limpio = os.path.basename(archivo)
-        nombre_limpio = re.sub(r'\(.*?\)', '', nombre_limpio)
-        nombre_limpio = re.sub(r'\[.*?\]', '', nombre_limpio)
-        nombre_limpio = re.sub(r'_', ' ', nombre_limpio)
-        nombre_limpio = re.sub(r'\s+', ' ', nombre_limpio).strip()
-        if not nombre_limpio.endswith('.mp3'):
-            nombre_limpio += '.mp3'
-
+        # Borra el archivo del servidor una vez que el teléfono termine de descargarlo
         def borrar():
             try:
-                if os.path.exists(archivo):
-                    os.remove(archivo)
+                if os.path.exists(archivo_temp):
+                    os.remove(archivo_temp)
             except Exception:
                 pass
 
+        # Codificación UTF-8 para que la app del celular interprete tildes y caracteres especiales
+        nombre_encoded = urllib.parse.quote(nombre_final)
+
         response = FileResponse(
-            path=archivo,
+            path=archivo_temp,
             media_type="audio/mpeg",
             background=BackgroundTask(borrar)
         )
-        response.headers["Content-Disposition"] = f'attachment; filename="{nombre_limpio}"'
+        response.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{nombre_encoded}"
         return response
 
     except Exception as e:
-        return {"status": "error", "mensaje": str(e)}
+        if os.path.exists(archivo_temp):
+            os.remove(archivo_temp)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/")
 def inicio():
-    return {"mensaje": "API de Listropik funcionando"}
+    return {"mensaje": "Servidor de música personal activo"}
