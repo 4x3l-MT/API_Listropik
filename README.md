@@ -28,9 +28,9 @@ A lightweight Python backend server designed to handle YouTube audio extraction 
 
 2. **Create and activate a virtual environment (recommended):
    python -m venv venv
-   # On Linux/macOS:
+    On Linux/macOS:
     source venv/bin/activate
-   # On Windows:
+    On Windows:
     venv\Scripts\activate
 
 3. **Install dependencies:
