@@ -26,20 +26,20 @@ A lightweight Python backend server designed to handle YouTube audio extraction 
    git clone [https://github.com/4x3l-MT/API_Listropik.git](https://github.com/4x3l-MT/API_Listropik.git)
    cd API_Listropik
 
-2. **Create and activate a virtual environment (recommended):
+2. **Create and activate a virtual environment (recommended):**
    python -m venv venv
     On Linux/macOS:
     source venv/bin/activate
     On Windows:
     venv\Scripts\activate
 
-3. **Install dependencies:
+3. **Install dependencies:**
    pip install -r requirements.txt
 
-4. **Start the server:
+4. **Start the server:**
    python main.py
 
-5. **Connect to Mobile App:
+5. **Connect to Mobile App:**
   Find your computer's local IP address (e.g., 192.168.1.X) and input it into the Listropik Android app settings.
 
 ## Related Repository
