@@ -19,7 +19,7 @@ A lightweight Python backend server designed to handle YouTube audio extraction 
 
 ---
 
-## 💻 Installation & Usage
+##  Installation & Usage
 
 1. **Clone the repository:**
    ```bash
@@ -44,4 +44,4 @@ A lightweight Python backend server designed to handle YouTube audio extraction 
 
 ## Related Repository
 
-    Mobile Application (Android): Listropik
+Mobile Aplication: [Listropik]([https://github.com/4x3l-MT/Listropik?tab=MIT-1-ov-file](https://github.com/4x3l-MT/Listropik.git))
