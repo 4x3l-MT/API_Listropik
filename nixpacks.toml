@@ -1,2 +1,14 @@
+[providers]
+providers = ["python"]
+
+[nixpkgs]
+pkgs = [
+    "python311",
+    "ffmpeg"
+]
+
 [phases.setup]
-nixPkgs = ["ffmpeg"]
+nixPkgs = ["python311", "ffmpeg"]
+
+[start]
+cmd = "uvicorn main:app --host 0.0.0.0 --port $PORT"
